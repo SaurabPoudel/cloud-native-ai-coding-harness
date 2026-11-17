@@ -1,4 +1,3 @@
-# backend/sandbox/_smoke.py
 from pathlib import Path
 from backend.sandbox import run_in_sandbox
 
