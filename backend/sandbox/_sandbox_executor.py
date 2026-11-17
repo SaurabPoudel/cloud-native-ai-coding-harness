@@ -1,4 +1,3 @@
-# backend/sandbox/_sandbox_executor.py
 import io
 import tarfile
 import uuid
