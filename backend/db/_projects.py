@@ -19,6 +19,7 @@ class Project:
 def _conn():
     return connect(DSN, autocommit=True, row_factory=dict_row)
 
+
 def init_schema():
     with _conn() as c, c.cursor() as cur:
         cur.execute("""
@@ -27,10 +28,22 @@ def init_schema():
                 name       TEXT NOT NULL,
                 prompt     TEXT NOT NULL,
                 status     TEXT NOT NULL DEFAULT 'pending',
+                attempts   INT  NOT NULL DEFAULT 0,
+                locked_at  TIMESTAMPTZ,
+                locked_by  TEXT,
+                last_error TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
-            CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+            -- migration for existing installs
+            ALTER TABLE projects ADD COLUMN IF NOT EXISTS attempts   INT NOT NULL DEFAULT 0;
+            ALTER TABLE projects ADD COLUMN IF NOT EXISTS locked_at  TIMESTAMPTZ;
+            ALTER TABLE projects ADD COLUMN IF NOT EXISTS locked_by  TEXT;
+            ALTER TABLE projects ADD COLUMN IF NOT EXISTS last_error TEXT;
+
+            CREATE INDEX IF NOT EXISTS idx_projects_pending
+                ON projects(id) WHERE status = 'pending';
         """)
+
 
 def create(name: str, prompt: str) -> int:
     with _conn() as c, c.cursor() as cur:
@@ -52,3 +65,51 @@ def get_pending(limit: int = 5) -> list[Project]:
 def set_status(pid: int, status: str):
     with _conn() as c, c.cursor() as cur:
         cur.execute("UPDATE projects SET status = %s WHERE id = %s;", (status, pid))
+
+def claim_one(worker_id: str, max_attempts: int = 3) -> Project | None:
+    """
+    Atomically claim ONE pending task. Returns None if queue is empty.
+    
+    Uses FOR UPDATE SKIP LOCKED so concurrent callers never claim the same row.
+    Single statement = single transaction = no race window.
+    """
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("""
+            WITH picked AS (
+                SELECT id FROM projects
+                WHERE status = 'pending'
+                  AND attempts < %s
+                ORDER BY id
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED
+            )
+            UPDATE projects
+            SET status    = 'running',
+                attempts  = projects.attempts + 1,
+                locked_at = now(),
+                locked_by = %s
+            WHERE id = (SELECT id FROM picked)
+            RETURNING *;
+        """, (max_attempts, worker_id))
+        row = cur.fetchone()
+        return Project(**row) if row else None
+
+
+def requeue_orphans(stale_after_sec: int = 300, max_attempts: int = 3) -> int:
+    """
+    Requeue rows stuck in 'running' whose lock is older than stale_after_sec.
+    Called periodically by the controller. Returns count requeued.
+    """
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("""
+            UPDATE projects
+            SET status     = 'pending',
+                locked_at  = NULL,
+                locked_by  = NULL,
+                last_error = 'requeued: stale lock'
+            WHERE status = 'running'
+              AND locked_at < now() - make_interval(secs => %s)
+              AND attempts < %s
+            RETURNING id;
+        """, (stale_after_sec, max_attempts))
+        return len(cur.fetchall())
