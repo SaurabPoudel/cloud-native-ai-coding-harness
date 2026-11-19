@@ -1,6 +1,8 @@
 import os
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Optional
+
 from psycopg import connect
 from psycopg.rows import dict_row
 from dotenv import load_dotenv
@@ -8,15 +10,22 @@ from dotenv import load_dotenv
 load_dotenv()
 DSN = os.environ["DATABASE_URL"]
 
+
 @dataclass
 class Project:
     id: int
     name: str
     prompt: str
-    status: str
+    status: str                                    # pending | running | done | failed
     created_at: datetime
+    attempts: int = 0
+    locked_at: Optional[datetime] = None
+    locked_by: Optional[str] = None
+    last_error: Optional[str] = None
+
 
 def _conn():
+    # autocommit=True → we don't leak connections from long agent loops
     return connect(DSN, autocommit=True, row_factory=dict_row)
 
 
@@ -34,7 +43,7 @@ def init_schema():
                 last_error TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
-            -- migration for existing installs
+            -- migrations for existing installs
             ALTER TABLE projects ADD COLUMN IF NOT EXISTS attempts   INT NOT NULL DEFAULT 0;
             ALTER TABLE projects ADD COLUMN IF NOT EXISTS locked_at  TIMESTAMPTZ;
             ALTER TABLE projects ADD COLUMN IF NOT EXISTS locked_by  TEXT;
@@ -48,8 +57,8 @@ def init_schema():
 def create(name: str, prompt: str) -> int:
     with _conn() as c, c.cursor() as cur:
         cur.execute(
-            "INSERT INTO projects (name, prompt) VALUES (%s, %s) RETURNING id;",
-            (name, prompt)
+            "INSERT INTO projects(name, prompt) VALUES (%s,%s) RETURNING id",
+            (name, prompt),
         )
         return cur.fetchone()["id"]
 
@@ -57,19 +66,24 @@ def create(name: str, prompt: str) -> int:
 def get_pending(limit: int = 5) -> list[Project]:
     with _conn() as c, c.cursor() as cur:
         cur.execute(
-            "SELECT  * FROM projects WHERE status = 'pending' ORDER BY created_at ASC LIMIT %s;",
-            (limit,)
+            "SELECT * FROM projects WHERE status='pending' ORDER BY id LIMIT %s",
+            (limit,),
         )
-        return [Project(**row) for row in cur.fetchall()]
+        return [Project(**r) for r in cur.fetchall()]
 
-def set_status(pid: int, status: str):
+
+def set_status(pid: int, status: str, error: str | None = None) -> None:
     with _conn() as c, c.cursor() as cur:
-        cur.execute("UPDATE projects SET status = %s WHERE id = %s;", (status, pid))
+        cur.execute(
+            "UPDATE projects SET status=%s, last_error=%s WHERE id=%s",
+            (status, error, pid),
+        )
+
 
 def claim_one(worker_id: str, max_attempts: int = 3) -> Project | None:
     """
     Atomically claim ONE pending task. Returns None if queue is empty.
-    
+
     Uses FOR UPDATE SKIP LOCKED so concurrent callers never claim the same row.
     Single statement = single transaction = no race window.
     """
