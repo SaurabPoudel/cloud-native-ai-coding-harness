@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { ProjectTask, TaskStatus } from '../api';
 import { StatusBadge } from './StatusBadge';
+import { useCancelTask, useDeleteTask, useCleanupTasks } from '../hooks/useHarness';
 import { 
   Search, 
   RotateCw, 
@@ -9,7 +10,9 @@ import {
   Cpu, 
   AlertTriangle,
   Clock,
-  Filter
+  Filter,
+  Ban,
+  Trash2,
 } from 'lucide-react';
 
 interface TaskTableProps {
@@ -47,6 +50,14 @@ export const TaskTable: React.FC<TaskTableProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all');
+  const cancelMutation = useCancelTask();
+  const deleteMutation = useDeleteTask();
+  const cleanupMutation = useCleanupTasks();
+
+  const hasSmokeTasks = useMemo(
+    () => tasks.some((t) => t.name.toLowerCase().startsWith('smoke')),
+    [tasks]
+  );
 
   // Filter tasks based on search query and status tab
   const filteredTasks = useMemo(() => {
@@ -71,8 +82,23 @@ export const TaskTable: React.FC<TaskTableProps> = ({
       pending: tasks.filter((t) => t.status === 'pending').length,
       done: tasks.filter((t) => t.status === 'done').length,
       failed: tasks.filter((t) => t.status === 'failed').length,
+      cancelled: tasks.filter((t) => t.status === 'cancelled').length,
     };
   }, [tasks]);
+
+  const handleCancelClick = (e: React.MouseEvent, taskId: number) => {
+    e.stopPropagation();
+    if (confirm(`Cancel Task #${taskId}?`)) {
+      cancelMutation.mutate(taskId);
+    }
+  };
+
+  const handleDeleteClick = (e: React.MouseEvent, taskId: number) => {
+    e.stopPropagation();
+    if (confirm(`Permanently delete Task #${taskId} and its workspace files?`)) {
+      deleteMutation.mutate(taskId);
+    }
+  };
 
   return (
     <div className="glass-panel rounded-2xl border border-zinc-800 shadow-xl overflow-hidden flex flex-col">
@@ -81,7 +107,7 @@ export const TaskTable: React.FC<TaskTableProps> = ({
         
         {/* Status Tabs */}
         <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
-          {(['all', 'running', 'pending', 'done', 'failed'] as const).map((tab) => (
+          {(['all', 'running', 'pending', 'done', 'failed', 'cancelled'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setStatusFilter(tab)}
@@ -115,6 +141,22 @@ export const TaskTable: React.FC<TaskTableProps> = ({
               className="w-full pl-9 pr-3 py-1.5 text-xs bg-zinc-950/80 border border-zinc-800 rounded-lg text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-colors"
             />
           </div>
+
+          {hasSmokeTasks && (
+            <button
+              onClick={() => {
+                if (confirm('Delete all old smoke-* test tasks and their temporary workspaces?')) {
+                  cleanupMutation.mutate('smoke');
+                }
+              }}
+              disabled={cleanupMutation.isPending}
+              className="inline-flex items-center gap-1.5 text-[11px] font-medium text-rose-300 hover:text-white px-2.5 py-1.5 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 transition-colors shrink-0"
+              title="Delete all smoke-* test tasks"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              <span>{cleanupMutation.isPending ? 'Purging...' : 'Purge Smoke'}</span>
+            </button>
+          )}
 
           <div
             className="flex items-center gap-1 text-[11px] text-zinc-500 px-2.5 py-1.5 rounded-lg bg-zinc-950/50 border border-zinc-800 shrink-0"
@@ -245,9 +287,28 @@ export const TaskTable: React.FC<TaskTableProps> = ({
                       </span>
                     </td>
 
-                    {/* Arrow action indicator */}
+                    {/* Actions column */}
                     <td className="py-3.5 px-3 text-right">
-                      <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-zinc-300 transition-transform group-hover:translate-x-0.5" />
+                      <div className="flex items-center justify-end gap-1.5">
+                        {(task.status === 'pending' || task.status === 'running') && (
+                          <button
+                            onClick={(e) => handleCancelClick(e, task.id)}
+                            className="p-1 rounded text-zinc-500 hover:text-amber-400 hover:bg-amber-950/40 border border-transparent hover:border-amber-800/40 opacity-0 group-hover:opacity-100 transition-all"
+                            title={`Cancel Task #${task.id}`}
+                          >
+                            <Ban className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => handleDeleteClick(e, task.id)}
+                          disabled={deleteMutation.isPending}
+                          className="p-1 rounded text-zinc-500 hover:text-rose-400 hover:bg-rose-950/40 border border-transparent hover:border-rose-800/40 opacity-0 group-hover:opacity-100 transition-all"
+                          title={`Delete Task #${task.id}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                        <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-zinc-300 transition-transform group-hover:translate-x-0.5" />
+                      </div>
                     </td>
                   </tr>
                 );

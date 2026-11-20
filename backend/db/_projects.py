@@ -75,9 +75,45 @@ def get_pending(limit: int = 5) -> list[Project]:
 def set_status(pid: int, status: str, error: str | None = None) -> None:
     with _conn() as c, c.cursor() as cur:
         cur.execute(
-            "UPDATE projects SET status=%s, last_error=%s WHERE id=%s",
+            "UPDATE projects SET status=%s, last_error=%s WHERE id=%s AND status != 'cancelled'",
             (status, error, pid),
         )
+
+
+def cancel_project(pid: int, reason: str = "Cancelled by user") -> bool:
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE projects
+            SET status = 'cancelled',
+                last_error = %s
+            WHERE id = %s AND status IN ('pending', 'running')
+            RETURNING id;
+            """,
+            (reason, pid),
+        )
+        row = cur.fetchone()
+        return row is not None
+
+
+def delete_project(pid: int) -> bool:
+    with _conn() as c, c.cursor() as cur:
+        cur.execute("DELETE FROM projects WHERE id = %s RETURNING id;", (pid,))
+        row = cur.fetchone()
+        return row is not None
+
+
+def cleanup_projects_db(target: str = "smoke") -> list[int]:
+    with _conn() as c, c.cursor() as cur:
+        if target == "smoke":
+            cur.execute("DELETE FROM projects WHERE name LIKE 'smoke%' RETURNING id;")
+        elif target in ("done", "failed", "cancelled"):
+            cur.execute("DELETE FROM projects WHERE status = %s RETURNING id;", (target,))
+        elif target == "all":
+            cur.execute("DELETE FROM projects RETURNING id;")
+        else:
+            return []
+        return [r["id"] for r in cur.fetchall()]
 
 
 def claim_one(worker_id: str, max_attempts: int = 3) -> Project | None:

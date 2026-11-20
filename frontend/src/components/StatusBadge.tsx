@@ -1,6 +1,6 @@
 import React from 'react';
 import { TaskStatus } from '../api';
-import { Loader2, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Loader2, Clock, CheckCircle2, AlertCircle, Ban } from 'lucide-react';
 
 interface StatusBadgeProps {
   status: TaskStatus | string;
@@ -49,6 +49,14 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
       text: 'text-rose-300',
       dotBg: 'bg-rose-400',
       icon: <AlertCircle className="w-3 h-3 text-rose-400" />,
+    },
+    cancelled: {
+      label: 'Cancelled',
+      bg: 'bg-amber-950/40',
+      border: 'border-amber-600/40',
+      text: 'text-amber-300',
+      dotBg: 'bg-amber-400',
+      icon: <Ban className="w-3 h-3 text-amber-400" />,
     },
   };
 

@@ -7,6 +7,9 @@ from ._projects import (
     set_status,
     claim_one,
     requeue_orphans,
+    cancel_project,
+    delete_project,
+    cleanup_projects_db,
 )
 
 __all__ = [
@@ -17,4 +20,7 @@ __all__ = [
     "set_status",
     "claim_one",
     "requeue_orphans",
+    "cancel_project",
+    "delete_project",
+    "cleanup_projects_db",
 ]

@@ -3,6 +3,11 @@ import {
   ProjectTask,
   SubmitTaskPayload,
   SubmitTaskResponse,
+  CancelTaskResponse,
+  DeleteTaskResponse,
+  CleanupTasksResponse,
+  WorkspaceFilesResponse,
+  WorkspaceFileContentResponse,
 } from './types';
 
 // Use environment variable if provided, otherwise default to relative path for Vite proxy
@@ -95,5 +100,53 @@ export const api = {
    */
   getProjectStatus: async (id: number): Promise<ProjectTask> => {
     return request<ProjectTask>(`/status/${id}`);
+  },
+
+  /**
+   * Cancel an in-progress or pending project task
+   */
+  cancelTask: async (id: number): Promise<CancelTaskResponse> => {
+    return request<CancelTaskResponse>(`/projects/${id}/cancel`, {
+      method: 'POST',
+    });
+  },
+
+  /**
+   * List files in the project's sandbox workspace
+   */
+  getWorkspaceFiles: async (projectId: number): Promise<WorkspaceFilesResponse> => {
+    return request<WorkspaceFilesResponse>(`/projects/${projectId}/files`);
+  },
+
+  /**
+   * Fetch text content of a workspace file
+   */
+  getWorkspaceFileContent: async (
+    projectId: number,
+    path: string
+  ): Promise<WorkspaceFileContentResponse> => {
+    return request<WorkspaceFileContentResponse>(
+      `/projects/${projectId}/file?path=${encodeURIComponent(path)}`
+    );
+  },
+
+  /**
+   * Delete a task and remove its sandbox workspace directory
+   */
+  deleteTask: async (id: number): Promise<DeleteTaskResponse> => {
+    return request<DeleteTaskResponse>(`/projects/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  /**
+   * Clean up tasks in bulk (e.g. 'smoke', 'done', 'failed', 'cancelled', 'all')
+   */
+  cleanupTasks: async (
+    target: 'smoke' | 'done' | 'failed' | 'cancelled' | 'all' = 'smoke'
+  ): Promise<CleanupTasksResponse> => {
+    return request<CleanupTasksResponse>(`/projects/cleanup?target=${target}`, {
+      method: 'POST',
+    });
   },
 };
