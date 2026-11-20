@@ -1,5 +1,6 @@
 from ._projects import (
     Project,
+    _conn,
     init_schema,
     create,
     get_pending,
